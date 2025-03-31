@@ -1,15 +1,25 @@
 package com.example.demo.audio;
 
 import org.springframework.web.socket.*;
+import org.springframework.web.socket.client.WebSocketClient;
+import org.springframework.web.socket.client.WebSocketConnectionManager;
+import org.springframework.web.socket.client.standard.StandardWebSocketClient;
 import org.springframework.web.socket.handler.BinaryWebSocketHandler;
-
 import javax.sound.sampled.*;
 import java.io.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class AudioWebSocketHandler extends BinaryWebSocketHandler {
-
+    public static AudioWebSocketHandler instance;
+    private final ConcurrentHashMap<String, WebSocketSession> frontendSessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ByteArrayOutputStream> audioBuffers = new ConcurrentHashMap<>();
+    private WebSocketClient pythonWebSocketClient;
+    private WebSocketSession pythonSession; // Store the WebSocketSession
+    private PythonWebSocketHandler pythonHandler; // Store the WebSocket handler for Python
+
+    public AudioWebSocketHandler() {
+        this.pythonHandler = new PythonWebSocketHandler(this);
+    }
 
     private final AudioFormat audioFormat = new AudioFormat(
         AudioFormat.Encoding.PCM_SIGNED,
@@ -23,9 +33,32 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws IOException {
+        String sessionId = session.getId();
         System.out.println("WebSocket connected: " + session.getId());
+        frontendSessions.put(sessionId, session);
         audioBuffers.put(session.getId(), new ByteArrayOutputStream());
+        System.out.println("New connection: " + sessionId);
+        System.out.println("Total connections: " + frontendSessions.size());
+        initializePythonWebSocket();
         session.sendMessage(new TextMessage("Connected to audio server"));
+    }
+
+    public void broadcastToFrontend(String message) {
+        System.out.println("Attempting to broadcast to " + frontendSessions.size() + " clients");
+        
+        frontendSessions.forEach((id, session) -> {
+            try {
+                if (session.isOpen()) {
+                    session.sendMessage(new TextMessage(message));
+                    System.out.println("Sent to " + id);
+                } else {
+                    System.out.println("Session " + id + " is closed");
+                    frontendSessions.remove(id); // Clean up closed sessions
+                }
+            } catch (IOException e) {
+                System.err.println("Error sending to " + id + ": " + e.getMessage());
+            }
+        });
     }
 
     @Override
@@ -38,8 +71,20 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) {
-        System.out.println("WebSocket disconnected: " + session.getId());
+        String sessionId = session.getId();
+        System.out.println("WebSocket disconnected: " + sessionId);
+        frontendSessions.remove(session.getId());
         processAndSaveAudio(session);
+        System.out.println("Connection closed: " + sessionId);
+        System.out.println("Remaining connections: " + frontendSessions.size());
+        if (pythonSession != null && pythonSession.isOpen()) {
+            try {
+                pythonSession.close();  // Close the WebSocket session
+                System.out.println("Closed WebSocket connection to Python server");
+            } catch (IOException e) {
+                System.err.println("Error closing WebSocket session: " + e.getMessage());
+            }
+        }
     }
 
     @Override
@@ -73,4 +118,59 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
             System.err.println("❌ Error saving audio file: " + e.getMessage());
         }
     }
+
+    private void initializePythonWebSocket() {
+        pythonWebSocketClient = new StandardWebSocketClient();
+        try {
+            // Create WebSocketConnectionManager and start the connection
+            WebSocketConnectionManager connectionManager = new WebSocketConnectionManager(pythonWebSocketClient, pythonHandler, "ws://127.0.0.1:50000");
+            connectionManager.start();  // Start the connection to Python WebSocket server
+            System.out.println("Trying to connect to Python WebSocket...");
+            int attempts = 0;
+            System.out.println("python session: " + pythonHandler.getSession());
+            while (pythonHandler.getSession() == null && attempts < 10) {
+                try {
+                    Thread.sleep(500);
+                    attempts++;
+                    System.out.println("Attempts: " + attempts);
+
+                } catch (InterruptedException e) {
+                    System.out.println("Error: " + e);
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+            System.out.println("python session 2: " + pythonHandler.getSession());
+            // // Wait until the WebSocket connection is fully established before proceeding
+            // while (pythonSession == null || !pythonSession.isOpen()) {
+            //     System.out.println("Waiting for Python WebSocket connection...");
+            //     Thread.sleep(1000);  // Wait for 1 second before checking again
+            // }
+                
+            // Once connected, you can safely send data
+            sendDataToPython(pythonHandler.getSession());
+    
+        } catch (Exception e) {
+            System.err.println("Error during WebSocket connection or sending data: " + e.getMessage());
+        }
+    }
+    private void sendDataToPython(WebSocketSession session) {
+        // Ensure pythonSession is not null before attempting to send data
+        if (session!= null && session.isOpen()) {
+            try {
+                String message = "Hello from Java";  // Example data
+                session.sendMessage(new TextMessage(message)); // Send data to Python
+                System.out.println("Sent data to Python: " + message);
+            } catch (IOException e) {
+                System.err.println("Error sending data to Python: " + e.getMessage());
+            }
+        } else {
+            System.err.println("Error: Python WebSocket session is not yet established or is closed.");
+        }
+    }
+
+    public ConcurrentHashMap<String, WebSocketSession> getFrontendSessions() {
+        return frontendSessions;
+    }
+    
 }
