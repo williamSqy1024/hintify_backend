@@ -4,24 +4,32 @@ import wave
 from vosk_speech2text import VoskModel
 
 class AudioProcessor():
-    def __init__(self, Model):
+    def __init__(self, Model, chunk_size=50000):
+        print("Initiating Audio Processor")
         self.model = Model
+        self.message_chunk_size = chunk_size
+        self.message_buffer = b''
 
     # WebSocket server that handles messages from Java
     async def audio_server(self, websocket):  # The second argument can be ignored, hence using '_'
         try:
             print(f"Connection established with {websocket.remote_address}")
-            
+
             # Loop to handle incoming messages
             async for message in websocket:
                 if isinstance(message, bytes):  # Check if the message is binary (audio)
                     response = "Hintify received your aduio!!!"
                     await websocket.send(response)
                     # print(f"Received audio chunk of size: {len(message)} bytes")
-                    text = self.model.convert_audio_to_text(message)
-                    print(f"Python final recognized_text: {text}")
+                    # print(f"Python appened bytes len of new messages: {len(self.messages)}")
 
-                    self.save_audio(message)  # Save the received audio data
+                    if len(self.message_buffer) > self.message_chunk_size:
+                        text = self.model.convert_audio_to_text(self.message_buffer)
+                        print(f"Python final recognized_text: {text}")
+                        self.message_buffer = b''
+                    else:
+                        self.message_buffer += message
+                    # self.save_audio(message)  # Save the received audio data
                 else:
                     response = "This is the message from Python Server, Welcome to use Hintify"
                     await websocket.send(response)
