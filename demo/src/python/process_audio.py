@@ -1,7 +1,6 @@
 import asyncio
 import websockets
 import wave
-import io
 
 # WebSocket server that handles messages from Java
 async def audio_server(websocket):  # The second argument can be ignored, hence using '_'
@@ -11,6 +10,8 @@ async def audio_server(websocket):  # The second argument can be ignored, hence 
         # Loop to handle incoming messages
         async for message in websocket:
             if isinstance(message, bytes):  # Check if the message is binary (audio)
+                response = "Hintify received your aduio!!!"
+                await websocket.send(response)
                 print(f"Received audio chunk of size: {len(message)} bytes")
                 save_audio(message)  # Save the received audio data
             else:
@@ -28,14 +29,15 @@ async def audio_server(websocket):  # The second argument can be ignored, hence 
 # Function to save received audio to a file
 def save_audio(audio_data):
     try:
-        # Convert the byte data into an in-memory file stream
-        audio_stream = io.BytesIO(audio_data)
+        sample_width = 2  # 16-bit audio (modify based on Java settings)
+        frame_rate = 16000  # Sample rate (modify based on Java settings)
+        num_channels = 1  # Mono or Stereo
         
-        # Open the audio stream as a WAV file
-        with wave.open(audio_stream, 'rb') as audio_file:
-            with wave.open("received_audio.wav", 'wb') as output_file:
-                output_file.setparams(audio_file.getparams())  # Set parameters for output file
-                output_file.writeframes(audio_file.readframes(audio_file.getnframes()))  # Write frames to file
+        with wave.open("uploads/received_audio_python.wav", 'wb') as output_file:
+            output_file.setnchannels(num_channels)
+            output_file.setsampwidth(sample_width)
+            output_file.setframerate(frame_rate)
+            output_file.writeframes(audio_data)
 
         print("✅ Audio saved successfully to 'received_audio.wav'")
     

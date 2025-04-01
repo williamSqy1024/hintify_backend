@@ -14,7 +14,6 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
     private final ConcurrentHashMap<String, WebSocketSession> frontendSessions = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ByteArrayOutputStream> audioBuffers = new ConcurrentHashMap<>();
     private WebSocketClient pythonWebSocketClient;
-    private WebSocketSession pythonSession; // Store the WebSocketSession
     private PythonWebSocketHandler pythonHandler; // Store the WebSocket handler for Python
 
     public AudioWebSocketHandler() {
@@ -37,10 +36,10 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
         System.out.println("WebSocket connected: " + session.getId());
         frontendSessions.put(sessionId, session);
         audioBuffers.put(session.getId(), new ByteArrayOutputStream());
+        initializePythonWebSocket();
         System.out.println("New connection: " + sessionId);
         System.out.println("Total connections: " + frontendSessions.size());
-        initializePythonWebSocket();
-        session.sendMessage(new TextMessage("Connected to audio server"));
+        // session.sendMessage(new TextMessage("Connected to audio server"));
     }
 
     public void broadcastToFrontend(String message) {
@@ -49,6 +48,7 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
         frontendSessions.forEach((id, session) -> {
             try {
                 if (session.isOpen()) {
+                    System.out.println("broadcastToFrontend test: " + message);
                     session.sendMessage(new TextMessage(message));
                     System.out.println("Sent to " + id);
                 } else {
@@ -67,6 +67,8 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
 
         byte[] audioBytes = message.getPayload().array();
         audioBuffers.computeIfAbsent(session.getId(), k -> new ByteArrayOutputStream()).write(audioBytes, 0, audioBytes.length);
+        sendDataToPython(pythonHandler.getSession(), audioBytes);
+
     }
 
     @Override
@@ -77,9 +79,9 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
         processAndSaveAudio(session);
         System.out.println("Connection closed: " + sessionId);
         System.out.println("Remaining connections: " + frontendSessions.size());
-        if (pythonSession != null && pythonSession.isOpen()) {
+        if (pythonHandler.getSession() != null && pythonHandler.getSession().isOpen()) {
             try {
-                pythonSession.close();  // Close the WebSocket session
+                pythonHandler.getSession().close();  // Close the WebSocket session
                 System.out.println("Closed WebSocket connection to Python server");
             } catch (IOException e) {
                 System.err.println("Error closing WebSocket session: " + e.getMessage());
@@ -94,29 +96,28 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
     }
 
     private void processAndSaveAudio(WebSocketSession session) {
-        System.out.println("test");
+        System.out.println("Send the audio bytes to Python!");
         ByteArrayOutputStream audioBuffer = audioBuffers.remove(session.getId());
-        System.out.println(audioBuffer == null);
-        System.out.println(audioBuffer.size());
 
         if (audioBuffer != null && audioBuffer.size() > 0) {
-            saveAudioToFile(audioBuffer.toByteArray(), "received_audio.wav");
+            saveAudioToFile(audioBuffer.toByteArray(), "uploads/received_audio_java.wav");
+            sendDataToPython(pythonHandler.getSession(), audioBuffer.toByteArray());
         }
     }
 
     private void saveAudioToFile(byte[] audioBytes, String fileName) {
-        try {
-            System.out.println(fileName);
-            ByteArrayInputStream bais = new ByteArrayInputStream(audioBytes);
-            AudioInputStream audioInputStream = new AudioInputStream(bais, audioFormat, audioBytes.length / audioFormat.getFrameSize());
+        try 
+            {
+                ByteArrayInputStream bais = new ByteArrayInputStream(audioBytes);
+                AudioInputStream audioInputStream = new AudioInputStream(bais, audioFormat, audioBytes.length / audioFormat.getFrameSize());
 
-            File file = new File(fileName);
-            AudioSystem.write(audioInputStream, AudioFileFormat.Type.WAVE, file);
+                File file = new File(fileName);
+                AudioSystem.write(audioInputStream, AudioFileFormat.Type.WAVE, file);
 
-            System.out.println("✅ Saved audio to: " + file.getAbsolutePath());
-        } catch (Exception e) {
-            System.err.println("❌ Error saving audio file: " + e.getMessage());
-        }
+                System.out.println("✅ Saved audio to: " + file.getAbsolutePath());
+            } catch (Exception e) {
+                System.err.println("❌ Error saving audio file: " + e.getMessage());
+            }
     }
 
     private void initializePythonWebSocket() {
@@ -141,25 +142,19 @@ public class AudioWebSocketHandler extends BinaryWebSocketHandler {
                 }
             }
             System.out.println("python session 2: " + pythonHandler.getSession());
-            // // Wait until the WebSocket connection is fully established before proceeding
-            // while (pythonSession == null || !pythonSession.isOpen()) {
-            //     System.out.println("Waiting for Python WebSocket connection...");
-            //     Thread.sleep(1000);  // Wait for 1 second before checking again
-            // }
-                
             // Once connected, you can safely send data
-            sendDataToPython(pythonHandler.getSession());
+            // sendDataToPython(pythonHandler.getSession());
     
         } catch (Exception e) {
             System.err.println("Error during WebSocket connection or sending data: " + e.getMessage());
         }
     }
-    private void sendDataToPython(WebSocketSession session) {
+    private void sendDataToPython(WebSocketSession session, byte[] audioBytes) {
         // Ensure pythonSession is not null before attempting to send data
         if (session!= null && session.isOpen()) {
             try {
                 String message = "Hello from Java";  // Example data
-                session.sendMessage(new TextMessage(message)); // Send data to Python
+                session.sendMessage(new BinaryMessage(audioBytes)); // Send data to Python
                 System.out.println("Sent data to Python: " + message);
             } catch (IOException e) {
                 System.err.println("Error sending data to Python: " + e.getMessage());
