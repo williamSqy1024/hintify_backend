@@ -1,0 +1,1 @@
+VOSK Model: Download the smallest model vosk-model-small-en-us-0.15 from https://alphacephei.com/vosk/models for testing
